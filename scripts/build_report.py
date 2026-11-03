@@ -20,7 +20,7 @@ FIG = os.path.join(ROOT, "outputs")
 NAME = "古恩宇"
 SID = "20245651"
 CLASS = "人工智能2402"
-GITHUB = "<GITHUB_LINK_PLACEHOLDER>"
+GITHUB = "https://github.com/shisiyu-cmd/fovea-localization"
 
 
 # ---------------- 样式工具 ----------------
