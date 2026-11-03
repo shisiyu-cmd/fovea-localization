@@ -59,6 +59,54 @@ def add_para(doc, text="", size=12, bold=False, font="宋体",
     return p
 
 
+def add_hyperlink(paragraph, url, text, size=11, font="Consolas",
+                  color=(0, 90, 200)):
+    """向段落追加一个真正的可点击超链接（w:hyperlink）。
+
+    直接给 run 上色只能做到「看起来像链接」，在 Word 里点击无反应。
+    必须建立 r:id 关系并包一层 w:hyperlink 元素。
+    """
+    from docx.opc.constants import RELATIONSHIP_TYPE as RT
+
+    part = paragraph.part
+    r_id = part.relate_to(url, RT.HYPERLINK, is_external=True)
+
+    hyperlink = OxmlElement("w:hyperlink")
+    hyperlink.set(qn("r:id"), r_id)
+
+    new_run = OxmlElement("w:r")
+    rPr = OxmlElement("w:rPr")
+
+    # 颜色
+    c = OxmlElement("w:color")
+    c.set(qn("w:val"), "%02X%02X%02X" % color)
+    rPr.append(c)
+
+    # 下划线
+    u = OxmlElement("w:u")
+    u.set(qn("w:val"), "single")
+    rPr.append(u)
+
+    # 字体
+    rfonts = OxmlElement("w:rFonts")
+    for attr in ("w:ascii", "w:hAnsi", "w:eastAsia"):
+        rfonts.set(qn(attr), font)
+    rPr.append(rfonts)
+
+    sz = OxmlElement("w:sz")
+    sz.set(qn("w:val"), str(int(size * 2)))  # 半磅
+    rPr.append(sz)
+
+    new_run.append(rPr)
+    t = OxmlElement("w:t")
+    t.text = text
+    new_run.append(t)
+    hyperlink.append(new_run)
+
+    paragraph._p.append(hyperlink)
+    return hyperlink
+
+
 def add_heading(doc, text, level=1):
     sizes = {1: 15, 2: 13.5}
     p = doc.add_paragraph()
@@ -66,6 +114,9 @@ def add_heading(doc, text, level=1):
     pf.space_before = Pt(14 if level == 1 else 10)
     pf.space_after = Pt(8 if level == 1 else 6)
     pf.line_spacing = 1.35
+    # 标题不与后续正文分离（避免标题孤立在页底）
+    pf.keep_with_next = True
+    pf.keep_together = True
     r = p.add_run(text)
     set_cn_font(r, "黑体", sizes.get(level, 12), bold=True)
     return p
@@ -90,6 +141,9 @@ def add_code(doc, text, size=9.5):
     pf.space_before = Pt(4)
     pf.space_after = Pt(8)
     pf.line_spacing = 1.15
+    # 代码块是单个段落（内部用换行符分行），必须禁止跨页拆分，
+    # 否则会被页面边界切成两半、灰色底纹也断成两块。
+    pf.keep_together = True
     ppr = p._element.get_or_add_pPr()
     shd = OxmlElement("w:shd")
     shd.set(qn("w:val"), "clear")
@@ -178,9 +232,18 @@ def add_table(doc, headers, rows, widths=None, size=10.5):
             set_cn_font(r, "宋体", size)
 
     if widths:
+        # 关闭自动调整并改为固定布局，否则 Word 会忽略手动设置的列宽
+        t.autofit = False
+        tblPr = t._tbl.tblPr
+        layout = OxmlElement("w:tblLayout")
+        layout.set(qn("w:type"), "fixed")
+        tblPr.append(layout)
         for i, w in enumerate(widths):
             for row in t.rows:
                 row.cells[i].width = Cm(w)
+        # 同时写入列定义，确保渲染器按此显示
+        for i, w in enumerate(widths):
+            t.columns[i].width = Cm(w)
     return t
 
 
@@ -262,15 +325,19 @@ def build():
     # ===== 1. Github 链接 =====
     add_heading(doc, "1. Github 链接", 1)
     add_para(doc, "本作业的全部源代码、实验脚本与结果图表已整理为可直接运行的工程，仓库地址：")
+
     p = doc.add_paragraph()
     p.paragraph_format.left_indent = Pt(24)
     p.paragraph_format.space_after = Pt(8)
-    r = p.add_run(GITHUB)
-    set_cn_font(r, "Consolas", 11, color=(0, 90, 200))
+    add_hyperlink(p, GITHUB, GITHUB, size=11)
 
     add_para(doc, "仓库包含算法包 fovea_lab/（预处理、视盘定位、黄斑检测、评估指标）、"
                   "scripts/ 下的评估与作图脚本，以及 README 中的完整复现步骤。"
                   "数据集体积较大未纳入版本管理，按 README 说明放入 data/detection/ 即可复现全部结果。")
+
+    add_para(doc, "如需核对实现细节，推荐按以下顺序阅读仓库：先看 README 中的方法说明与结果表格，"
+                  "再看 fovea_lab/pipeline.py 了解整体流程，最后进入各子模块。"
+                  "运行 python scripts/evaluate.py 可直接复现本文表 4 的全部数字。")
 
     # ===== 2. 任务描述 =====
     add_heading(doc, "2. 任务描述 你要做什么", 1)
@@ -502,7 +569,7 @@ def build():
                ["B +视盘方向判断", "343.9 px", "34.8 px", "55.0%"],
                ["C +血管抑制", "376.0 px", "47.8 px", "51.2%"],
                ["D 完整（+解剖先验）", "64.9 px", "16.1 px", "86.2%"]],
-              widths=[5.8, 3.4, 3.4, 3.4])
+              widths=[6.9, 3.1, 3.1, 3.1])
     add_caption(doc, "表 5　消融实验结果")
 
     add_picture(doc, os.path.join(FIG, "fig3_ablation.png"), width_cm=15.4)
